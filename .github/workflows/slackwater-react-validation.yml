@@ -1,0 +1,35 @@
+name: Slackwater React bundle validation
+on:
+  push:
+    branches: [ci/slackwater-react-547-20261120]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: tstotzer/slackwater
+          ref: 475aa98108c519039ac888942409dfff66dda85a
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: mise.toml
+      - name: Verify exact unbuilt candidate
+        run: |
+          test "$(git rev-parse HEAD)" = 475aa98108c519039ac888942409dfff66dda85a
+          git diff --exit-code
+          test ! -d packages/react/dist
+      - run: node --version
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Full coverage before workspace builds
+        run: npm run coverage
+      - run: npm run build
+      - run: npm run lint
+      - run: npm run test:release
+      - name: Verify tracked source remains unchanged
+        run: git diff --exit-code
