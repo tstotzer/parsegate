@@ -1,0 +1,66 @@
+name: GeoParquet layer validation
+on:
+  push:
+    branches: [ci/geoparquet-1473-20261122]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: tstotzer/geoparquet-io
+          ref: 52fd9a8636a8d376b990b242c34c055248ef412f
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          python-version: '3.12'
+          enable-cache: false
+      - name: Verify exact source and native symlink
+        run: |
+          test "$(git rev-parse HEAD)" = 52fd9a8636a8d376b990b242c34c055248ef412f
+          test -z "$(git status --porcelain)"
+          test -L docs/index.md
+          test "$(readlink docs/index.md)" = ../README.md
+      - run: uv sync --all-extras --frozen
+      - name: Install project CLI test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdal-bin tippecanoe
+      - name: Focused real-file and compatibility tests
+        run: >-
+          uv run pytest tests/test_convert_layer.py tests/test_list_layers.py
+          tests/test_convert_layer_bounds.py tests/test_convert.py
+          tests/test_filegdb_layer_membership.py tests/test_filegdb_versions.py
+          -m "not network"
+      - name: Full fast coverage and required global floor
+        run: >-
+          uv run pytest -n 4 -m "not slow and not network and not meta"
+          --cov=geoparquet_io --cov-report=xml --cov-report=term:skip-covered
+      - name: Changed-line and branch coverage
+        run: >-
+          uv run diff-cover coverage.xml --compare-branch bfd150db0f0b4acd1eb01514b24bc4fd35cc57bd
+          --fail-under 90 --branch-coverage
+      - name: All commit-stage project hooks
+        run: uv run pre-commit run --all-files
+      - name: All pre-push project hooks
+        run: uv run pre-commit run --all-files --hook-stage pre-push
+      - run: uv run python scripts/doc_sync.py --check
+      - name: Affected guide examples
+        run: uv run pytest docs/guide/convert.md -m "not network" --timeout=600
+      - name: Strict documentation build and TOC check
+        run: |
+          uv run zensical build --clean --strict
+          uv run python scripts/check_toc_html.py site
+      - name: Project source security check
+        run: uv run bandit -r geoparquet_io/ -c pyproject.toml
+      - name: Verify tracked source stayed unchanged
+        run: git diff --exit-code
+      - name: Focused DuckDB 2 compatibility
+        run: |
+          uv pip install --reinstall 'duckdb>=2,<2.1'
+          uv run --no-sync python -c 'import duckdb; print(duckdb.__version__)'
+          uv run --no-sync pytest tests/test_convert_layer.py tests/test_list_layers.py tests/test_convert_layer_bounds.py tests/test_convert.py tests/test_filegdb_layer_membership.py tests/test_filegdb_versions.py -m "not network"
