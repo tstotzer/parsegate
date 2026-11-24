@@ -1,0 +1,59 @@
+name: PartCAD CAM rollback validation
+on:
+  push:
+    branches: [ci/partcad-cam-976-20261124]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PC_PYTHON_SANDBOX: venv
+      PC_TELEMETRY_ENV: test
+      PC_TELEMETRY_PERFORMANCE: 'false'
+      POETRY_VIRTUALENVS_IN_PROJECT: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: tstotzer/partcad
+          ref: dea29eecd3a10c876b9650af67b5e7143cba2d47
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Verify exact candidate and native toolchain
+        run: |
+          test "$(git rev-parse HEAD)" = dea29eecd3a10c876b9650af67b5e7143cba2d47
+          git diff --exit-code
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git-lfs openscad
+          git lfs install --local
+          QT_QPA_PLATFORM=offscreen openscad --version
+          python -m pip install poetry==2.4.1
+          poetry install --no-interaction
+          poetry run python dev-tools/check_installed_files.py
+      - name: Full project formatting checks
+        run: |
+          poetry run isort --check-only --diff --filter-files --settings-path pyproject.toml .
+          poetry run black --check --diff .
+          poetry run flake8 .
+      - name: Service and related CAD declaration regression tests
+        run: |
+          export PC_INTERNAL_STATE_DIR="$RUNNER_TEMP/partcad-state"
+          export PYTEST_RESULT_MARKER="$RUNNER_TEMP/partcad-pytest-result.txt"
+          poetry run pytest tests/partcad_service_json_rpc \
+            tests/partcad/unit/test_requirements_edit.py \
+            tests/partcad/unit/test_cam_view.py tests/partcad/unit/test_cam_config.py \
+            tests/partcad/unit/test_cam_materialize.py tests/partcad/unit/test_cam_preview.py \
+            tests/partcad/unit/test_cam_output.py tests/partcad/unit/test_cam_gcode.py \
+            -x -p no:error-for-skips -p no:warnings -n logical --dist worksteal
+          test "$(cat "$PYTEST_RESULT_MARKER")" = success
+      - name: Execute affected CLI examples
+        run: |
+          export PC_INTERNAL_STATE_DIR="$RUNNER_TEMP/partcad-state"
+          export PARTCAD_ROOT="$GITHUB_WORKSPACE"
+          poetry run behave features/cam.feature
+      - name: Verify tracked source is unchanged
+        run: git diff --exit-code
