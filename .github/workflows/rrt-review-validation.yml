@@ -1,0 +1,34 @@
+name: Research review protocol validation
+on:
+  push:
+    branches: [ci/rrt-review-275-20261125]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: tstotzer/research-repo-tools
+          ref: 6fd16c698fb843c0e626bd3fe6cc7ea08ab84c8e
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version-file: pyproject.toml
+      - name: Verify exact candidate and native prerequisites
+        run: |
+          test "$(git rev-parse HEAD)" = 6fd16c698fb843c0e626bd3fe6cc7ea08ab84c8e
+          git diff --exit-code
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config jq
+          uv sync --locked
+          rustup toolchain install --no-self-update
+      - name: Full source and isolated wheel and sdist gates
+        run: uv run --locked just ci
+      - name: Verify tracked source remains unchanged
+        run: git diff --exit-code
